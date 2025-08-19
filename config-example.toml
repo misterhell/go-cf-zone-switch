@@ -1,0 +1,11 @@
+[AT]
+base = "app..."
+domains_table = "tbl..."
+accounts_table = "tbl..."
+accounts_view = "viw..."
+token = "patm..."
+
+
+[Servers]
+main = "176.9.0.2"
+proxy = ["176.9.0.2", "176.9.0.2"]
