@@ -6,4 +6,5 @@ type AtConfig interface {
 	GetAccountTable() string
 	GetAccountView() string
 	GetApiToken() string
+	GetHostingTable() string
 }

@@ -7,6 +7,7 @@ type Repository interface {
 type AtDomain struct {
 	Domain string
 	Token  string
+	// HostingIP string
 }
 
 type LocalRepository struct {
@@ -18,6 +19,7 @@ func (l *LocalRepository) GetAllDomains() ([]AtDomain, error) {
 		{
 			"bzzzzzz.tech",
 			"kUSn8Q-SFT4-ISrWuZr16kNf5WHeSD7dZBs0alsy",
+			// "176.9.70.14",
 		},
 	}, nil
 }

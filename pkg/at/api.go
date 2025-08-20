@@ -13,6 +13,7 @@ const (
 	apiV0             = "https://api.airtable.com/v0"
 	fieldApiKey       = "API Key CF (from Domain)"
 	fieldDomainReqIDs = "Domain"
+	fieldHostingReqIDs = "Hosting"
 
 	fieldsDomainTblDomain = "Domain"
 )
@@ -138,18 +139,37 @@ func (c *Client) handleResponse(resp *http.Response, result interface{}) error {
 	return nil
 }
 
-// fetchPage fetches a single page of records with optional offset
-func (c *Client) fetchPage(table, view, offset string) (*AirtableResponse, error) {
-	req, err := c.makeRequest("GET", table, view)
+// fetchPageOpts contains options for fetching a page of records
+type fetchPageOpts struct {
+	Table  string
+	View   string
+	Offset string
+	Params map[string][]string // Additional query parameters
+}
+
+// fetchPage fetches a single page of records with optional parameters
+func (c *Client) fetchPage(opts fetchPageOpts) (*AirtableResponse, error) {
+	req, err := c.makeRequest("GET", opts.Table, opts.View)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	if offset != "" {
-		query := req.URL.Query()
-		query.Set("offset", offset)
-		req.URL.RawQuery = query.Encode()
+	// Get existing query parameters
+	query := req.URL.Query()
+
+	// Add offset if provided
+	if opts.Offset != "" {
+		query.Set("offset", opts.Offset)
 	}
+
+	// Add additional parameters
+	for key, values := range opts.Params {
+		for _, value := range values {
+			query.Add(key, value)
+		}
+	}
+
+	req.URL.RawQuery = query.Encode()
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -169,7 +189,11 @@ func (c *Client) GetAllRecords() ([]Record, error) {
 	var offset string
 
 	for {
-		page, err := c.fetchPage(c.cfg.GetAccountTable(), c.cfg.GetAccountView(), offset)
+		page, err := c.fetchPage(fetchPageOpts{
+			Table:  c.cfg.GetAccountTable(),
+			View:   c.cfg.GetAccountView(),
+			Offset: offset,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch records: %w", err)
 		}
@@ -210,23 +234,20 @@ func (c *Client) multiDomainRequest(reqIDs []string) (map[string]string, error) 
 	}
 	formula := "OR(" + strings.Join(parts, ",") + ")"
 
-	// Create initial request to modify with our parameters
-	req, err := c.makeRequest("GET", c.cfg.GetDomainsTable(), "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Add our filter parameters
-	q := req.URL.Query()
-	q.Add("filterByFormula", formula)
-	q.Add("fields[]", fieldsDomainTblDomain)
-	req.URL.RawQuery = q.Encode()
-
 	var offset string
 
 	// Fetch all pages
+	params := map[string][]string{
+		"filterByFormula": {formula},
+		"fields[]":        {fieldsDomainTblDomain},
+	}
+
 	for {
-		page, err := c.fetchPage(c.cfg.GetDomainsTable(), "", offset)
+		page, err := c.fetchPage(fetchPageOpts{
+			Table:  c.cfg.GetDomainsTable(),
+			Params: params,
+			Offset: offset,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch domains page: %w", err)
 		}
