@@ -6,10 +6,11 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const (
-	API_V0            = "https://api.airtable.com/v0"
+	apiV0             = "https://api.airtable.com/v0"
 	fieldApiKey       = "API Key CF (from Domain)"
 	fieldDomainReqIDs = "Domain"
 
@@ -17,17 +18,21 @@ const (
 )
 
 type Client struct {
-	cfg AtConfig
+	cfg        AtConfig
+	httpClient *http.Client
 }
 
 func NewClient(cfg AtConfig) *Client {
 	return &Client{
 		cfg: cfg,
+		httpClient: &http.Client{
+			Timeout: time.Second * 30,
+		},
 	}
 }
 
 func (c *Client) makeRequest(reqType, tbl, view string) (*http.Request, error) {
-	url := fmt.Sprintf("%s/%s/%s", API_V0, c.cfg.GetBase(), tbl)
+	url := fmt.Sprintf("%s/%s/%s", apiV0, c.cfg.GetBase(), tbl)
 
 	req, err := http.NewRequest(reqType, url, nil)
 
@@ -106,75 +111,77 @@ type ErrorResponse struct {
 	} `json:"error"`
 }
 
-func (c *Client) GetAllRecords() ([]Record, error) {
-	records := []Record{}
-
-	req, err := c.makeRequest("GET", c.cfg.GetAccountTable(), c.cfg.GetAccountView())
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
+// handleResponse is a helper method to process HTTP responses and decode JSON data
+func (c *Client) handleResponse(resp *http.Response, result interface{}) error {
 	defer func() {
-		err := resp.Body.Close()
-		if err != nil {
-			log.Panicln(err)
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("failed to close response body: %v", err)
 		}
 	}()
 
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf("api returned 404 code")
+			return fmt.Errorf("api returned 404 code")
 		}
 
 		var errorResp ErrorResponse
-
 		if err := json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
-			return nil, err
+			return fmt.Errorf("failed to decode error response: %w", err)
 		}
-		return nil, fmt.Errorf("error response code %d, %+v", resp.StatusCode, errorResp)
+		return fmt.Errorf("api error: %+v", errorResp)
 	}
 
-	var airtableResp AirtableResponse
-	if err := json.NewDecoder(resp.Body).Decode(&airtableResp); err != nil {
-		return nil, err
+	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
 	}
-	records = append(records, airtableResp.Records...)
 
-	offset := airtableResp.Offset
-	for offset != "" {
-		// Create a new request with the offset parameter added in the query string.
-		req, err := c.makeRequest("GET", c.cfg.GetAccountTable(), c.cfg.GetAccountView())
-		if err != nil {
-			return nil, err
-		}
+	return nil
+}
 
-		// Append the offset parameter to the URL query.
+// fetchPage fetches a single page of records with optional offset
+func (c *Client) fetchPage(table, view, offset string) (*AirtableResponse, error) {
+	req, err := c.makeRequest("GET", table, view)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if offset != "" {
 		query := req.URL.Query()
 		query.Set("offset", offset)
 		req.URL.RawQuery = query.Encode()
+	}
 
-		resp, err := http.DefaultClient.Do(req)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+
+	var airtableResp AirtableResponse
+	if err := c.handleResponse(resp, &airtableResp); err != nil {
+		return nil, fmt.Errorf("failed to fetch page: %w", err)
+	}
+
+	return &airtableResp, nil
+}
+
+func (c *Client) GetAllRecords() ([]Record, error) {
+	var records []Record
+	var offset string
+
+	for {
+		page, err := c.fetchPage(c.cfg.GetAccountTable(), c.cfg.GetAccountView(), offset)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to fetch records: %w", err)
 		}
-		defer func() {
-			err := resp.Body.Close()
-			if err != nil {
-				log.Panicln(err)
-			}
-		}()
 
-		var airtableResp AirtableResponse
-		if err := json.NewDecoder(resp.Body).Decode(&airtableResp); err != nil {
-			return nil, err
+		records = append(records, page.Records...)
+
+		// If no more pages, break the loop
+		if page.Offset == "" {
+			break
 		}
-		records = append(records, airtableResp.Records...)
-		offset = airtableResp.Offset
+
+		offset = page.Offset
 	}
 
 	return records, nil
@@ -182,7 +189,6 @@ func (c *Client) GetAllRecords() ([]Record, error) {
 
 func (c *Client) GetDomain(reqID string) (string, error) {
 	domains, err := c.multiDomainRequest([]string{reqID})
-
 	if err != nil {
 		return "", err
 	}
@@ -195,63 +201,57 @@ func (c *Client) GetDomain(reqID string) (string, error) {
 }
 
 func (c *Client) multiDomainRequest(reqIDs []string) (map[string]string, error) {
-    result := make(map[string]string)
+	result := make(map[string]string)
 
-    req, err := c.makeRequest("GET", c.cfg.GetDomainsTable(), "")
-    if err != nil {
-        return nil, err
-    }
+	// Prepare the filter formula
+	var parts []string
+	for _, id := range reqIDs {
+		parts = append(parts, fmt.Sprintf("RECORD_ID()='%s'", id))
+	}
+	formula := "OR(" + strings.Join(parts, ",") + ")"
 
-    q := req.URL.Query()
+	// Create initial request to modify with our parameters
+	req, err := c.makeRequest("GET", c.cfg.GetDomainsTable(), "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
 
-    var parts []string
-    for _, id := range reqIDs {
-        parts = append(parts, fmt.Sprintf("RECORD_ID()='%s'", id))
-    }
-    formula := "OR(" + strings.Join(parts, ",") + ")"
+	// Add our filter parameters
+	q := req.URL.Query()
+	q.Add("filterByFormula", formula)
+	q.Add("fields[]", fieldsDomainTblDomain)
+	req.URL.RawQuery = q.Encode()
 
-    q.Add("filterByFormula", formula)
-    q.Add("fields[]", fieldsDomainTblDomain)
+	var offset string
 
-    req.URL.RawQuery = q.Encode()
+	// Fetch all pages
+	for {
+		page, err := c.fetchPage(c.cfg.GetDomainsTable(), "", offset)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch domains page: %w", err)
+		}
 
-    resp, err := http.DefaultClient.Do(req)
-    if err != nil {
-        return nil, err
-    }
-    defer resp.Body.Close()
+		// Process records from this page
+		for _, record := range page.Records {
+			if domain, ok := record.Fields[fieldsDomainTblDomain].(string); ok {
+				result[record.ID] = domain
+			}
+		}
 
-    if resp.StatusCode != http.StatusOK {
-        if resp.StatusCode == http.StatusNotFound {
-            return nil, fmt.Errorf("api returned 404 code requesting domain")
-        }
+		// If no more pages, break the loop
+		if page.Offset == "" {
+			break
+		}
 
-        var errorResp ErrorResponse
+		offset = page.Offset
+	}
 
-        if err := json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
-            return nil, err
-        }
-
-        return nil, fmt.Errorf("error response code %d, %+v", resp.StatusCode, errorResp)
-    }
-
-    var airtableResp AirtableResponse
-    if err := json.NewDecoder(resp.Body).Decode(&airtableResp); err != nil {
-        return nil, err
-    }
-
-    for _, record := range airtableResp.Records {
-        if domain, ok := record.Fields[fieldsDomainTblDomain].(string); ok {
-            result[record.ID] = domain
-        }
-    }
-    return result, nil
+	return result, nil
 }
 
 // return map of reqIDs to domains
 func (c *Client) GetDomains(reqIDs []string) (map[string]string, error) {
 	domains, err := c.multiDomainRequest(reqIDs)
-
 	if err != nil {
 		return nil, err
 	}
