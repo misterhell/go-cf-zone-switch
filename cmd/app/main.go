@@ -1,67 +1,127 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"log"
+	"net"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	// "go-cf-zone-switch/pkg/at"
 	"go-cf-zone-switch/pkg/at"
 	"go-cf-zone-switch/pkg/config"
-	"log"
-	"os"
+	"go-cf-zone-switch/pkg/servers"
 )
 
-// "flag"
-// "fmt"
-// "go-cf-zone-switch/pkg/servers"
-// "strings"
-// "time"
+type Reporter struct {
+	domains map[string]string
+}
 
+func NewReporter() *Reporter {
+	return &Reporter{
+		domains: map[string]string{},
+	}
+}
+
+func (r *Reporter) AddDomain(domain, cfToken string) {
+	r.domains[domain] = cfToken
+}
+
+func (r *Reporter) ReportStatus(statuses []servers.ServerStatus) error {
+	for _, s := range statuses {
+		log.Printf("%+v\n", s)
+	}
+	return nil
+}
+
+type Notifier interface {
+	Notify() error
+}
 
 func main() {
 	cfgPath := flag.String("config-path", "config.toml", "Set path of toml file with config ")
 
-	// help := flag.Bool("help", false, "--help")
-
 	flag.Parse()
 	cfg, err := config.Load(*cfgPath)
 
-	log.Printf("%+v %v", cfg, err)
+	log.Printf("Config loaded %s ", *cfgPath)
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)
 	}
 
-	remote := at.NewRemoteRepository(cfg.At)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	domains, err := remote.GetAllDomains()
-	
-	
-
+	reporter, err := initReporter(ctx, cfg)
 	if err != nil {
-		log.Printf("%+v", err)
+		log.Println(err)
+		os.Exit(1)
 	}
-	
-	log.Printf("%+v", domains)
-	
-	// mainHost := flag.String("main-host", "", "")
 
-	// flag.Parse()
-	
+	err = initMonitoring(ctx, cfg, reporter)
+	if err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
 
-	// spl := strings.Split((*mainHost), ":")
-	// fmt.Println(spl)
-	// ip, port := spl[0], spl[1]
+	sigs := make(chan os.Signal, 1)
+	done := make(chan bool, 1)
 
-	// for {
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	// 	time.Sleep(time.Second)
+	go func() {
+		select {
+		case sig := <-sigs:
+			log.Println(sig)
+			cancel() // Cancel context on signal
+		case <-ctx.Done():
+			log.Println("context canceled")
+		}
+		done <- true
+	}()
 
-	// 	// ip := "176.9.70.13"
-	// 	// port := "80"
+	log.Println("awaiting signal or context cancellation")
+	<-done
+	time.Sleep(time.Second * 1) // awaiting for routines to finish
+	log.Println("exiting")
+}
 
-	// 	ok, err := servers.IsServerReachable(ip, port, time.Second * 5)
+func initReporter(ctx context.Context, cfg *config.Config) (*Reporter, error) {
+	reporter := NewReporter()
 
+	rep := at.NewLocalRepository()
 
-	// 	fmt.Printf("Requesting host %s:%s ok:%t %v \n", ip, port, ok, err)
+	domains, err := rep.GetAllDomains()
+	if err != nil {
+		return nil, err
+	}
 
-	// }
+	for _, d := range domains {
+		reporter.AddDomain(d.Domain, d.CfApiToken)
+	}
 
+	return reporter, nil
+}
+
+func initMonitoring(ctx context.Context, cfg *config.Config, reporter *Reporter) error {
+	checkInterval := time.Second * time.Duration(cfg.Servers.CheckIntervalSec)
+	timeout := time.Second * time.Duration(cfg.Servers.TimeoutSec)
+
+	monitoring := servers.NewServerMonitoring(checkInterval, timeout, reporter)
+
+	for _, proxy := range cfg.Servers.Proxy {
+		h, p, err := net.SplitHostPort(proxy)
+		if err != nil {
+			return err
+		}
+		monitoring.AddServer(h, p, proxy)
+	}
+
+	monitoring.Start(ctx)
+
+	return nil
 }

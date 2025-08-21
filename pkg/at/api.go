@@ -10,12 +10,13 @@ import (
 )
 
 const (
-	apiV0             = "https://api.airtable.com/v0"
-	fieldApiKey       = "API Key CF (from Domain)"
-	fieldDomainReqIDs = "Domain"
+	apiV0              = "https://api.airtable.com/v0"
+	fieldApiKey        = "API Key CF (from Domain)"
+	fieldDomainReqIDs  = "Domain"
 	fieldHostingReqIDs = "Hosting"
 
-	fieldsDomainTblDomain = "Domain"
+	fieldsDomainTblDomain     = "Domain"
+	fieldsDomainTblHostingIDs = "Hosting"
 )
 
 type Client struct {
@@ -60,10 +61,13 @@ type Record struct {
 	ID          string                 `json:"id"`
 	Fields      map[string]interface{} `json:"fields"`
 	CreatedTime string                 `json:"createdTime"`
+
+	CfApiToken        string
+	DomainsRecordsIDs []string
 }
 
 // It returns the value as a string if present, or an error if missing or not a string.
-func (r *Record) GetAPIKeyCF() string {
+func (r *Record) getAPIKeyCF() string {
 	value, exists := r.Fields[fieldApiKey]
 	if !exists {
 		return ""
@@ -86,7 +90,7 @@ func (r *Record) GetAPIKeyCF() string {
 	return ""
 }
 
-func (r *Record) GetDomainsReqIDs() []string {
+func (r *Record) getDomainsReqIDs() []string {
 	val, exists := r.Fields[fieldDomainReqIDs]
 
 	if exists {
@@ -100,6 +104,7 @@ func (r *Record) GetDomainsReqIDs() []string {
 			return domains
 		}
 	}
+	log.Println("not exist")
 
 	return []string{}
 }
@@ -184,7 +189,7 @@ func (c *Client) fetchPage(opts fetchPageOpts) (*AirtableResponse, error) {
 	return &airtableResp, nil
 }
 
-func (c *Client) GetAllRecords() ([]Record, error) {
+func (c *Client) FetchAllAccountRecords() ([]Record, error) {
 	var records []Record
 	var offset string
 
@@ -193,9 +198,17 @@ func (c *Client) GetAllRecords() ([]Record, error) {
 			Table:  c.cfg.GetAccountTable(),
 			View:   c.cfg.GetAccountView(),
 			Offset: offset,
+			Params: map[string][]string{
+				"fields[]": {fieldApiKey, fieldDomainReqIDs},
+			},
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch records: %w", err)
+		}
+
+		for i, r := range page.Records {
+			page.Records[i].CfApiToken = r.getAPIKeyCF()
+			page.Records[i].DomainsRecordsIDs = r.getDomainsReqIDs()
 		}
 
 		records = append(records, page.Records...)
@@ -211,21 +224,26 @@ func (c *Client) GetAllRecords() ([]Record, error) {
 	return records, nil
 }
 
-func (c *Client) GetDomain(reqID string) (string, error) {
+func (c *Client) GetDomain(reqID string) (string, string, error) {
 	domains, err := c.multiDomainRequest([]string{reqID})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	if len(domains) > 0 {
-		return domains[reqID], nil
+	if record, ok := domains[reqID]; ok {
+		return record.Domain, record.HostingID, nil
 	}
 
-	return "", fmt.Errorf("no data")
+	return "", "", fmt.Errorf("no data")
 }
 
-func (c *Client) multiDomainRequest(reqIDs []string) (map[string]string, error) {
-	result := make(map[string]string)
+type domainRecord struct {
+	Domain    string
+	HostingID string
+}
+
+func (c *Client) multiDomainRequest(reqIDs []string) (map[string]domainRecord, error) {
+	result := make(map[string]domainRecord)
 
 	// Prepare the filter formula
 	var parts []string
@@ -239,7 +257,7 @@ func (c *Client) multiDomainRequest(reqIDs []string) (map[string]string, error) 
 	// Fetch all pages
 	params := map[string][]string{
 		"filterByFormula": {formula},
-		"fields[]":        {fieldsDomainTblDomain},
+		"fields[]":        {fieldsDomainTblDomain, fieldsDomainTblHostingIDs},
 	}
 
 	for {
@@ -254,8 +272,77 @@ func (c *Client) multiDomainRequest(reqIDs []string) (map[string]string, error) 
 
 		// Process records from this page
 		for _, record := range page.Records {
+			var dr domainRecord
+
+			// Get domain name
 			if domain, ok := record.Fields[fieldsDomainTblDomain].(string); ok {
-				result[record.ID] = domain
+				dr.Domain = domain
+			}
+
+			// Get hosting IDs
+			if hostings, ok := record.Fields[fieldsDomainTblHostingIDs].([]interface{}); ok {
+				for _, h := range hostings {
+					if hostingID, ok := h.(string); ok {
+						dr.HostingID = hostingID
+					}
+				}
+			}
+
+			result[record.ID] = dr
+		}
+
+		// If no more pages, break the loop
+		if page.Offset == "" {
+			break
+		}
+
+		offset = page.Offset
+	}
+
+	return result, nil
+}
+
+// GetDomains returns maps of reqIDs to domains and their hosting IDs
+func (c *Client) GetDomains(reqIDs []string) (map[string]domainRecord, error) {
+	domains, err := c.multiDomainRequest(reqIDs)
+	if err != nil {
+		return nil, err
+	}
+	return domains, nil
+}
+
+func (c *Client) multiHostingRequest(reqIDs []string) (map[string]string, error) {
+	result := make(map[string]string)
+
+	// Prepare the filter formula
+	var parts []string
+	for _, id := range reqIDs {
+		parts = append(parts, fmt.Sprintf("RECORD_ID()='%s'", id))
+	}
+	formula := "OR(" + strings.Join(parts, ",") + ")"
+
+	var offset string
+
+	// Fetch all pages
+	params := map[string][]string{
+		"filterByFormula": {formula},
+		"fields[]":        {"IP"},
+	}
+
+	for {
+		page, err := c.fetchPage(fetchPageOpts{
+			Table:  c.cfg.GetHostingTable(),
+			Params: params,
+			Offset: offset,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch hosting page: %w", err)
+		}
+
+		// Process records from this page
+		for _, record := range page.Records {
+			if ip, ok := record.Fields["IP"].(string); ok {
+				result[record.ID] = ip
 			}
 		}
 
@@ -270,12 +357,11 @@ func (c *Client) multiDomainRequest(reqIDs []string) (map[string]string, error) 
 	return result, nil
 }
 
-// return map of reqIDs to domains
-func (c *Client) GetDomains(reqIDs []string) (map[string]string, error) {
-	domains, err := c.multiDomainRequest(reqIDs)
+// GetHostingByIds returns a map of reqIDs to hosting IPs
+func (c *Client) GetHostingByIds(reqIDs []string) (map[string]string, error) {
+	hostings, err := c.multiHostingRequest(reqIDs)
 	if err != nil {
 		return nil, err
 	}
-
-	return domains, nil
+	return hostings, nil
 }

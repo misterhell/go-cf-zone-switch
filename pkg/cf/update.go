@@ -1,8 +1,5 @@
 package cf
 
-import (
-	"fmt"
-)
 
 // UpdateDomainsIP updates A records for multiple domains with a new IP address
 // domainTokens is a map where key is the domain and value is the Cloudflare API token
@@ -18,19 +15,4 @@ func UpdateDomainsIP(domainTokens map[string]string, newIP string) map[string]er
 	}
 
 	return results
-}
-
-// PrintUpdateResults prints the results of UpdateDomainsIP in a human-readable format
-func PrintUpdateResults(results map[string]error) string {
-	var output string
-
-	for domain, err := range results {
-		if err != nil {
-			output += fmt.Sprintf("❌ Failed to update %s: %v\n", domain, err)
-		} else {
-			output += fmt.Sprintf("✅ Successfully updated %s\n", domain)
-		}
-	}
-
-	return output
 }

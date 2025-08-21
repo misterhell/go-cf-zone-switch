@@ -5,9 +5,9 @@ type Repository interface {
 }
 
 type AtDomain struct {
-	Domain string
-	Token  string
-	// HostingIP string
+	Domain     string
+	CfApiToken string
+	HostingIP  string
 }
 
 type LocalRepository struct {
@@ -17,9 +17,9 @@ type LocalRepository struct {
 func (l *LocalRepository) GetAllDomains() ([]AtDomain, error) {
 	return []AtDomain{
 		{
-			"bzzzzzz.tech",
-			"kUSn8Q-SFT4-ISrWuZr16kNf5WHeSD7dZBs0alsy",
-			// "176.9.70.14",
+			Domain:     "bzzzzzz.tech",
+			CfApiToken: "kUSn8Q-SFT4-ISrWuZr16kNf5WHeSD7dZBs0alsy",
+			HostingIP:  "176.9.70.14",
 		},
 	}, nil
 }
@@ -41,46 +41,54 @@ func NewRemoteRepository(cfg AtConfig) *RemoteRepository {
 }
 
 func (r *RemoteRepository) GetAllDomains() ([]AtDomain, error) {
-	records, err := r.client.GetAllRecords()
+	accountsRecords, err := r.client.FetchAllAccountRecords()
 	if err != nil {
 		return nil, err
 	}
 
 	// Collect all domain request IDs and map record ID to API key
 	var allDomainReqIDs []string
-	recordIDToAPIKey := make(map[string]string)
-	for _, rec := range records {
-		ids := rec.GetDomainsReqIDs()
+	recordIDToAPIToken := make(map[string]string)
+	for _, rec := range accountsRecords {
+		ids := rec.getDomainsReqIDs()
 		allDomainReqIDs = append(allDomainReqIDs, ids...)
-		recordIDToAPIKey[rec.ID] = rec.GetAPIKeyCF()
+		recordIDToAPIToken[rec.ID] = rec.CfApiToken
 	}
 
-	// Request all domains in one batch
-	domainIDToDomain, err := r.client.GetDomains(allDomainReqIDs)
+	// Request all domains with their hosting information
+	domainsData, err := r.client.GetDomains(allDomainReqIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	hostingIDs := []string{}
+
+	for _, domain := range domainsData {
+		hostingIDs = append(hostingIDs, domain.HostingID)
+	}
+
+	hostingRecIdsToIPs, err := r.client.GetHostingByIds(hostingIDs)
 	if err != nil {
 		return nil, err
 	}
 
 	atDomains := []AtDomain{}
-	for recordID, domain := range domainIDToDomain {
-		apiKey := ""
-		// Find which record this domain belongs to
-		for _, rec := range records {
-			ids := rec.GetDomainsReqIDs()
-			for _, id := range ids {
-				if id == recordID {
-					apiKey = rec.GetAPIKeyCF()
-					break
+
+	for _, accountRecord := range accountsRecords {
+		for _, domainID := range accountRecord.DomainsRecordsIDs {
+			if domainData, ok := domainsData[domainID]; ok {
+				atDomain := AtDomain{
+					CfApiToken: accountRecord.CfApiToken,
+					Domain:     domainData.Domain,
 				}
-			}
-			if apiKey != "" {
-				break
+
+				if hostingIP, ok := hostingRecIdsToIPs[domainData.HostingID]; ok {
+					atDomain.HostingIP = hostingIP
+				}
+
+				atDomains = append(atDomains, atDomain)
 			}
 		}
-		atDomains = append(atDomains, AtDomain{
-			Domain: domain,
-			Token:  apiKey,
-		})
 	}
 
 	return atDomains, nil

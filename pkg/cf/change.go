@@ -206,6 +206,34 @@ func (c *Client) UpdateDNSRecord(zoneID, recordID, newIP string) error {
 	return nil
 }
 
+// GetDomainIP retrieves the current IP address of the A record for a domain
+func (c *Client) GetDomainIP(domain string) (string, error) {
+	// Step 1: Get the zone ID for the domain
+	zoneID, err := c.GetZoneID(domain)
+	if err != nil {
+		return "", fmt.Errorf("failed to get zone ID: %w", err)
+	}
+
+	// Step 2: Get the A record for the domain
+	records, err := c.GetDNSRecords(zoneID, "A", domain)
+	if err != nil {
+		return "", fmt.Errorf("failed to get DNS records: %w", err)
+	}
+
+	if len(records) == 0 {
+		return "", fmt.Errorf("no A record found for domain %s", domain)
+	}
+
+	// Return the IP address from the first matching A record
+	for _, record := range records {
+		if record.Type == "A" && record.Name == domain {
+			return record.Content, nil
+		}
+	}
+
+	return "", fmt.Errorf("no matching A record found for domain %s", domain)
+}
+
 // UpdateDomainIP updates the A record for a domain with a new IP address
 func (c *Client) UpdateDomainIP(domain, newIP string) error {
 	// Step 1: Get the zone ID for the domain
@@ -236,16 +264,4 @@ func (c *Client) UpdateDomainIP(domain, newIP string) error {
 	}
 
 	return fmt.Errorf("no matching A record found for domain %s", domain)
-}
-
-// BatchUpdateDomainsIP updates multiple domains with the same new IP address
-func (c *Client) BatchUpdateDomainsIP(domains []string, newIP string) map[string]error {
-	results := make(map[string]error)
-
-	for _, domain := range domains {
-		err := c.UpdateDomainIP(domain, newIP)
-		results[domain] = err
-	}
-
-	return results
 }

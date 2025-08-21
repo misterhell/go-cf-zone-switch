@@ -5,6 +5,7 @@ type At struct {
 	DomainsTable  string `toml:"domains_table"`
 	AccountsTable string `toml:"accounts_table"`
 	AccountsView  string `toml:"accounts_view"`
+	HostingTable  string `toml:"hosting_table"`
 
 	Token string `toml:"token"`
 }
@@ -29,6 +30,20 @@ func (a At) GetApiToken() string {
 	return a.Token
 }
 
+func (a At) GetHostingTable() string {
+	return a.HostingTable
+}
+
+type Servers struct {
+	Proxy            []string `toml:"proxy"`
+	CheckIntervalSec int      `toml:"check_interval_sec"`
+	TimeoutSec       int      `toml:"timeout_sec"`
+
+	ProxyConfEndpoint string `toml:"proxy_conf_endpoint"`
+	ProxyConfUpdateINtervalMin int `toml:"proxy_conf_update_interval_min"`
+}
+
 type Config struct {
-	At At `toml:"AT"`
+	At      At      `toml:"AT"`
+	Servers Servers `toml:"Servers"`
 }
