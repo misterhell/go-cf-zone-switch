@@ -40,7 +40,7 @@ func NewRemoteRepository(cfg AtConfig) *RemoteRepository {
 	}
 }
 
-func (r *RemoteRepository) GetAllDomains() ([]AtDomain, error) {
+func (r *RemoteRepository) GetAllDomainsForIpChange() ([]AtDomain, error) {
 	accountsRecords, err := r.client.FetchAllAccountRecords()
 	if err != nil {
 		return nil, err
@@ -89,6 +89,46 @@ func (r *RemoteRepository) GetAllDomains() ([]AtDomain, error) {
 				atDomains = append(atDomains, atDomain)
 			}
 		}
+	}
+
+	return atDomains, nil
+}
+
+func (r *RemoteRepository) GetAllDomains() ([]AtDomain, error) {
+	domainsData, err := r.client.FetchAllDomains()
+
+	if err != nil {
+		return nil, err
+	}
+
+	hostingIDsMap := map[string]bool{}
+
+	for _, domain := range domainsData {
+		hostingIDsMap[domain.HostingID] = true
+	}
+
+	hostingIDs := []string{}
+	for ID := range hostingIDsMap {
+		hostingIDs = append(hostingIDs, ID)
+	}
+
+	hostingRecIdsToIPs, err := r.client.GetHostingByIds(hostingIDs)
+	if err != nil {
+		return nil, err
+	}
+	
+	atDomains := []AtDomain{}
+	for _, domain := range domainsData {
+		hostingIP := ""
+
+		if ip, ok := hostingRecIdsToIPs[domain.HostingID]; ok {
+			hostingIP = ip
+		}
+
+		atDomains = append(atDomains, AtDomain{
+			Domain: domain.Domain,
+			HostingIP: hostingIP,
+		})
 	}
 
 	return atDomains, nil

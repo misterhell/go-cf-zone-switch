@@ -3,6 +3,7 @@ package at
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -132,6 +133,10 @@ func (c *Client) handleResponse(resp *http.Response, result interface{}) error {
 
 		var errorResp ErrorResponse
 		if err := json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			
+			log.Printf("Error Status %d, Full response body: %s", resp.StatusCode, string(bodyBytes))
+
 			return fmt.Errorf("failed to decode error response: %w", err)
 		}
 		return fmt.Errorf("api error: %+v", errorResp)
@@ -364,4 +369,53 @@ func (c *Client) GetHostingByIds(reqIDs []string) (map[string]string, error) {
 		return nil, err
 	}
 	return hostings, nil
+}
+
+// FetchAllDomains retrieves all domain records from the domains table
+func (c *Client) FetchAllDomains() ([]domainRecord, error) {
+	var records []domainRecord
+	var offset string
+
+	for {
+		page, err := c.fetchPage(fetchPageOpts{
+			Table:  c.cfg.GetDomainsTable(),
+			Offset: offset,
+			Params: map[string][]string{
+				"fields[]": {fieldsDomainTblDomain, fieldsDomainTblHostingIDs},
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch domain records: %w", err)
+		}
+
+		// Process records from this page
+		for _, record := range page.Records {
+			var dr domainRecord
+
+			// Get domain name
+			if domain, ok := record.Fields[fieldsDomainTblDomain].(string); ok {
+				dr.Domain = domain
+			}
+
+			// Get hosting IDs (take the first one if exists)
+			if hostings, ok := record.Fields[fieldsDomainTblHostingIDs].([]interface{}); ok && len(hostings) > 0 {
+				if hostingID, ok := hostings[0].(string); ok {
+					dr.HostingID = hostingID
+				}
+			}
+
+			if dr.Domain != "" { // Only add records that have a domain name
+				records = append(records, dr)
+			}
+		}
+
+		// If no more pages, break the loop
+		if page.Offset == "" {
+			break
+		}
+
+		offset = page.Offset
+	}
+
+	return records, nil
 }
