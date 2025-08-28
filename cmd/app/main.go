@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -23,7 +22,9 @@ type Reporter struct {
 	storage *db.Storage
 }
 
-func NewReporter(storage *db.Storage) *Reporter {
+func NewReporter(ctx context.Context, storage *db.Storage, noti Notifier) *Reporter {
+	_ = noti 
+	_ = ctx
 	return &Reporter{
 		storage: storage,
 	}
@@ -33,16 +34,11 @@ func (r *Reporter) ReportStatus(statuses []servers.ServerStatus) error {
 	serverRows := []db.ProxyServerRow{}
 	for _, s := range statuses {
 		log.Printf("reporter: Report received %+v\n", s)
-		portInt, err := strconv.Atoi(s.Port)
-		if err != nil {
-			log.Printf("Invalid port %s for host %s, using 0", s.Port, s.Host)
-			portInt = 0
-		}
 
 		serverRows = append(serverRows, db.ProxyServerRow{
 			Host:      s.Host,
 			IsUp:      s.IsUp,
-			CheckPort: portInt,
+			CheckPort: s.Port,
 			LastCheck: s.LastCheck,
 		})
 	}
@@ -56,7 +52,7 @@ func (r *Reporter) ReportStatus(statuses []servers.ServerStatus) error {
 }
 
 type Notifier interface {
-	Notify() error
+	Notify(message string) error
 }
 
 func checkErr(err error) {
@@ -87,17 +83,17 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// notifier := notifications.TelegramNotifier{}
+	notifier := getNotifier(cfg)
 
 	// TODO: replace with a real service
-	reporter := NewReporter(storage)
+	reporter := NewReporter(ctx, storage, notifier)
 
-	err = startMonitoring(ctx, cfg, reporter)
+	err = startMonitoring(ctx, cfg, reporter, notifier)
 	checkErr(err)
 
-	startDomainDataSync(ctx, storage, repo, cfg)
+	startDomainDataSync(ctx, storage, repo, cfg, notifier)
 
-	startProxyConfigurator(ctx, storage, cfg)
+	startProxyConfigurator(ctx, storage, cfg, notifier)
 
 	sigs := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
@@ -121,14 +117,15 @@ func main() {
 	log.Println("app: exiting")
 }
 
-func startMonitoring(ctx context.Context, cfg *config.Config, reporter *Reporter) error {
+func startMonitoring(ctx context.Context, cfg *config.Config, reporter *Reporter, notifier Notifier) error {
 	checkInterval := time.Second * time.Duration(cfg.Servers.CheckIntervalSec)
 	timeout := time.Second * time.Duration(cfg.Servers.TimeoutSec)
 
-	monitoring := servers.NewServerMonitoring(checkInterval, timeout, reporter)
+	monitoring := servers.NewServerMonitoring(checkInterval, timeout, reporter, notifier)
 
 	for _, proxy := range cfg.Servers.Proxy {
 		h, p, err := net.SplitHostPort(proxy)
+		
 		if err != nil {
 			return err
 		}
@@ -140,16 +137,23 @@ func startMonitoring(ctx context.Context, cfg *config.Config, reporter *Reporter
 	return nil
 }
 
-func startDomainDataSync(ctx context.Context, storage *db.Storage, repo *at.RemoteRepository, config *config.Config) {
+func getNotifier(cfg *config.Config) notifications.Notifier {
+	notifier := notifications.NewStackNotifier()
+	notifier.AddNotifier(notifications.NewTelegramNotifier(cfg))
+
+	return notifier
+}
+
+func startDomainDataSync(ctx context.Context, storage *db.Storage, repo *at.RemoteRepository, config *config.Config, notifier Notifier) {
 	updateInterval := time.Duration(config.At.DomainsUpdateMin) * time.Minute
 
-	updater := at.NewDbDomainsSync(storage, repo, updateInterval)
+	updater := at.NewDbDomainsSync(storage, repo, updateInterval, notifier)
 
 	updater.Start(ctx)
 }
 
-func startProxyConfigurator(ctx context.Context, storage *db.Storage, config *config.Config) {
-	configUpdater := servers.NewProxyConfigUpdater(storage, &config.Servers)
+func startProxyConfigurator(ctx context.Context, storage *db.Storage, config *config.Config, notifier Notifier) {
+	configUpdater := servers.NewProxyConfigUpdater(storage, &config.Servers, notifier)
 
 	configUpdater.Start(ctx)
 }

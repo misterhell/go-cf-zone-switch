@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
-	"strconv"
 	"time"
 
 	"go-cf-zone-switch/pkg/config"
@@ -20,6 +20,7 @@ type ProxyConfigUpdater struct {
 	Storage        *db.Storage
 	UpdateInterval time.Duration
 	Endpoint       string
+	Notifier       Notifier
 }
 
 type Domain struct {
@@ -31,13 +32,14 @@ type Server struct {
 	Address string
 }
 
-func NewProxyConfigUpdater(storage *db.Storage, config *config.Servers) *ProxyConfigUpdater {
+func NewProxyConfigUpdater(storage *db.Storage, config *config.Servers, notifier Notifier) *ProxyConfigUpdater {
 	interval := time.Minute * time.Duration(config.DomainUpdateIntervalMin)
 
 	return &ProxyConfigUpdater{
 		Storage:        storage,
 		UpdateInterval: interval,
 		Endpoint:       config.DomainUpdateEndpoint,
+		Notifier:       notifier,
 	}
 }
 
@@ -94,7 +96,7 @@ func (p *ProxyConfigUpdater) getActiveProxyServers() ([]Server, error) {
 	s := []Server{}
 	for _, sr := range serversRows {
 		s = append(s, Server{
-			Address: sr.Host + ":" + strconv.Itoa(sr.CheckPort),
+			Address: net.JoinHostPort(sr.Host, sr.CheckPort),
 		})
 	}
 
@@ -121,8 +123,26 @@ func (p *ProxyConfigUpdater) updateDomains() error {
 	return nil
 }
 
+func newHttpClient() *http.Client {
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true, // ⚠️ ОПАСНО: только для отладки! //nolint:gosec
+		},
+	}
+
+	// Execute the POST request.
+	client := &http.Client{
+		Transport: tr,
+		Timeout:   time.Second * 20,
+	}
+
+	return client
+}
+
 func (p *ProxyConfigUpdater) sendUpdateToServer(server Server, domains []Domain) error {
 	log.Printf("configurator: sending domain updates to %s \n", server.Address)
+
+	client := newHttpClient()
 
 	batchSize := 100
 	total := len(domains)
@@ -133,7 +153,7 @@ func (p *ProxyConfigUpdater) sendUpdateToServer(server Server, domains []Domain)
 		}
 		batch := domains[i:end]
 
-		// TODO: could be http or https
+		// TODO: could be http or https?
 		url := "http://" + server.Address + p.Endpoint
 
 		// Marshal the batch of domains into JSON.
@@ -149,19 +169,9 @@ func (p *ProxyConfigUpdater) sendUpdateToServer(server Server, domains []Domain)
 		}
 		req.Header.Set("Content-Type", "application/json")
 
-		tr := &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true, // ⚠️ ОПАСНО: только для отладки! //nolint:gosec
-			},
-		}
-
-		// Execute the POST request.
-		client := &http.Client{
-			Transport: tr,
-			Timeout:   time.Second * 20,
-		}
 		resp, err := client.Do(req)
 		if err != nil {
+			err := p.Notifier.Notify("Error sending update for domains: response code >= 300")
 			return fmt.Errorf("failed to send request: %w", err)
 		}
 		defer resp.Body.Close()
@@ -169,7 +179,10 @@ func (p *ProxyConfigUpdater) sendUpdateToServer(server Server, domains []Domain)
 		// Check if the server returned an error status.
 		if resp.StatusCode >= 300 {
 			body, _ := io.ReadAll(resp.Body)
-			// TODO: send report
+			err := p.Notifier.Notify("Error sending update for domains: response code >= 300")
+			if err != nil {
+				return err
+			}
 			// TODO: update server in server list as isUP = false
 			return fmt.Errorf("server returned status %s: %s", resp.Status, body)
 		}

@@ -26,20 +26,18 @@ type ServerMonitor struct {
 	checkInterval time.Duration
 	timeout time.Duration
 	reporter StatusReporter
-	// notifier Notifier
+	notifier Notifier
 	stopCh chan struct{}
 	wg sync.WaitGroup
 }
 
-func NewServerMonitoring(checkInterval, timeout time.Duration, reporter StatusReporter, 
-	// notifier Notifier
-	) *ServerMonitor {
+func NewServerMonitoring(checkInterval, timeout time.Duration, reporter StatusReporter, notifier Notifier) *ServerMonitor {
 	return &ServerMonitor{
 		servers:  []struct{ Host, Port, ID string}{},
 		checkInterval: checkInterval,
 		timeout: timeout,
 		reporter: reporter,
-		// notifier: notifier,
+		notifier: notifier,
 		stopCh: make(chan struct{}),
 	}
 }

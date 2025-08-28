@@ -1,6 +1,9 @@
 package notifications
 
-import "errors"
+import (
+	"errors"
+	"log"
+)
 
 type Notifier interface {
 	Notify(message string) error
@@ -22,6 +25,7 @@ func (s *StackNotifier) AddNotifier(n Notifier) {
 }
 
 func (s *StackNotifier) Notify(message string) error {
+	log.Printf("notifier: received message \"%s\"", message)
 	errSlice := []error{}
 	for _, n := range s.notifiers {
 		err := n.Notify(message)

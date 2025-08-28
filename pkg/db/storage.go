@@ -2,7 +2,6 @@ package db
 
 import (
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -113,7 +112,7 @@ func (s *Storage) GetAllDomains() ([]DomainRow, error) {
 type ProxyServerRow struct {
 	IsUp      bool      `json:"is_up"`
 	Host      string    `json:"host"`
-	CheckPort int       `json:"check_port"`
+	CheckPort string    `json:"check_port"`
 	LastCheck time.Time `json:"last_check"`
 }
 
@@ -158,11 +157,11 @@ func (s *Storage) GetProxyServers(isUp bool) ([]ProxyServerRow, error) {
 				return err
 			}
 			servers = append(servers, s)
-			
+
 			return nil
 		})
 	})
-	fmt.Println("debug: after loading servers is", servers)
+
 	if isUp {
 		filtered := make([]ProxyServerRow, 0, len(servers))
 		for _, server := range servers {
@@ -175,3 +174,5 @@ func (s *Storage) GetProxyServers(isUp bool) ([]ProxyServerRow, error) {
 
 	return servers, err
 }
+
+// func (s *Storage) Update

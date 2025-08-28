@@ -1,5 +1,4 @@
-package servers
-
+package at
 
 type Notifier interface {
 	Notify(message string) error

@@ -12,13 +12,15 @@ type DbDomainsUpdater struct {
 	Db       *db.Storage
 	Repo     *RemoteRepository
 	Interval time.Duration
+	Notifier Notifier
 }
 
-func NewDbDomainsSync(db *db.Storage, at *RemoteRepository, interval time.Duration) *DbDomainsUpdater {
+func NewDbDomainsSync(db *db.Storage, at *RemoteRepository, interval time.Duration, notifier Notifier) *DbDomainsUpdater {
 	return &DbDomainsUpdater{
 		Db:       db,
 		Repo:     at,
 		Interval: interval,
+		Notifier: notifier,
 	}
 }
 
@@ -36,6 +38,7 @@ func (d *DbDomainsUpdater) Start(ctx context.Context) {
 			case <-ticker.C:
 				if err := d.Sync(); err != nil {
 					log.Println("updater: Domains update error", err)
+					_ = d.Notifier.Notify("Error updating domains: " + err.Error())
 				}
 				log.Println("updater: Domains updated")
 
