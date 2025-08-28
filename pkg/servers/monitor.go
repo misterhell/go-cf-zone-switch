@@ -26,16 +26,20 @@ type ServerMonitor struct {
 	checkInterval time.Duration
 	timeout time.Duration
 	reporter StatusReporter
+	// notifier Notifier
 	stopCh chan struct{}
 	wg sync.WaitGroup
 }
 
-func NewServerMonitoring(checkInterval, timeout time.Duration, reporter StatusReporter) *ServerMonitor {
+func NewServerMonitoring(checkInterval, timeout time.Duration, reporter StatusReporter, 
+	// notifier Notifier
+	) *ServerMonitor {
 	return &ServerMonitor{
 		servers:  []struct{ Host, Port, ID string}{},
 		checkInterval: checkInterval,
 		timeout: timeout,
 		reporter: reporter,
+		// notifier: notifier,
 		stopCh: make(chan struct{}),
 	}
 }
@@ -100,6 +104,7 @@ func (m *ServerMonitor) checkServers(ctx context.Context) {
     }
     
     if err := m.reporter.ReportStatus(statuses); err != nil {
+		// m.notifier.Notify(" Failed to report server statuses")
         log.Printf("monitor: Failed to report server statuses: %v", err)
     }
 }

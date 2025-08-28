@@ -1,5 +1,10 @@
 package at
 
+import (
+	"os"
+	"regexp"
+)
+
 type Repository interface {
 	GetAllDomains() ([]AtDomain, error)
 }
@@ -17,9 +22,9 @@ type LocalRepository struct {
 func (l *LocalRepository) GetAllDomains() ([]AtDomain, error) {
 	return []AtDomain{
 		{
-			Domain:     "bzzzzzz.tech",
-			CfApiToken: "kUSn8Q-SFT4-ISrWuZr16kNf5WHeSD7dZBs0alsy",
-			HostingIP:  "176.9.70.14",
+			Domain:     os.Getenv("LOCAL_DOMAIN"),
+			CfApiToken: os.Getenv("LOCAL_CF_API_TOKEN"),
+			HostingIP:  os.Getenv("LOCAL_HOSTING"),
 		},
 	}, nil
 }
@@ -125,8 +130,10 @@ func (r *RemoteRepository) GetAllDomains() ([]AtDomain, error) {
 			hostingIP = ip
 		}
 
+		re := regexp.MustCompile(`[^a-zA-Z0-9.-]`)
+		cleanDomain := re.ReplaceAllString(domain.Domain, "")
 		atDomains = append(atDomains, AtDomain{
-			Domain: domain.Domain,
+			Domain:    cleanDomain,
 			HostingIP: hostingIP,
 		})
 	}

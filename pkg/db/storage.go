@@ -2,6 +2,8 @@ package db
 
 import (
 	"encoding/json"
+	"fmt"
+	"time"
 
 	"github.com/boltdb/bolt"
 )
@@ -101,10 +103,75 @@ func (s *Storage) GetAllDomains() ([]DomainRow, error) {
 			return nil
 		})
 	})
-	
 	if err != nil {
 		return nil, err
 	}
 
 	return domains, nil
+}
+
+type ProxyServerRow struct {
+	IsUp      bool      `json:"is_up"`
+	Host      string    `json:"host"`
+	CheckPort int       `json:"check_port"`
+	LastCheck time.Time `json:"last_check"`
+}
+
+func (d ProxyServerRow) Key() []byte {
+	return []byte(d.Host)
+}
+
+func (d ProxyServerRow) Value() ([]byte, error) {
+	return json.Marshal(d)
+}
+
+func (s *Storage) SaveProxyServers(servers []ProxyServerRow) error {
+	return s.db.Batch(func(tx *bolt.Tx) error {
+		b := tx.Bucket(serverBucket)
+		for _, server := range servers {
+			key := server.Key()
+			val, err := server.Value()
+			if err != nil {
+				return err
+			}
+			if err := b.Put(key, val); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Storage) GetProxyServers(isUp bool) ([]ProxyServerRow, error) {
+	var servers []ProxyServerRow
+
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(serverBucket)
+		if b == nil {
+			return nil
+		}
+
+		return b.ForEach(func(k, v []byte) error {
+			var s ProxyServerRow
+
+			if err := json.Unmarshal(v, &s); err != nil {
+				return err
+			}
+			servers = append(servers, s)
+			
+			return nil
+		})
+	})
+	fmt.Println("debug: after loading servers is", servers)
+	if isUp {
+		filtered := make([]ProxyServerRow, 0, len(servers))
+		for _, server := range servers {
+			if server.IsUp {
+				filtered = append(filtered, server)
+			}
+		}
+		servers = filtered
+	}
+
+	return servers, err
 }

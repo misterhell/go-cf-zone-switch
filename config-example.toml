@@ -5,10 +5,11 @@ accounts_table = "tbl..."
 accounts_view = "viw..."
 hosting_table = "tbl..."
 token = "patm..."
-
+domains_update_min = 60
 
 [Servers]
 proxy = ["176.9.0.2", "176.9.0.2"]
 check_interval_sec = 30
 timeout_sec = 5
-
+domain_update_endpoint = "/update"
+domain_update_interval_min = 60

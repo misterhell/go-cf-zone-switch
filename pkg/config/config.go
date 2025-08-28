@@ -1,11 +1,12 @@
 package config
 
 type At struct {
-	Base          string `toml:"base"`
-	DomainsTable  string `toml:"domains_table"`
-	AccountsTable string `toml:"accounts_table"`
-	AccountsView  string `toml:"accounts_view"`
-	HostingTable  string `toml:"hosting_table"`
+	Base             string `toml:"base"`
+	DomainsTable     string `toml:"domains_table"`
+	AccountsTable    string `toml:"accounts_table"`
+	AccountsView     string `toml:"accounts_view"`
+	HostingTable     string `toml:"hosting_table"`
+	DomainsUpdateMin int    `toml:"domains_update_min"`
 
 	Token string `toml:"token"`
 }
@@ -39,8 +40,10 @@ type Servers struct {
 	CheckIntervalSec int      `toml:"check_interval_sec"`
 	TimeoutSec       int      `toml:"timeout_sec"`
 
-	ProxyConfEndpoint string `toml:"proxy_conf_endpoint"`
-	ProxyConfUpdateINtervalMin int `toml:"proxy_conf_update_interval_min"`
+	ProxyConfEndpoint          string `toml:"proxy_conf_endpoint"`
+	ProxyConfUpdateINtervalMin int    `toml:"proxy_conf_update_interval_min"`
+	DomainUpdateEndpoint       string `toml:"domain_update_endpoint"`
+	DomainUpdateIntervalMin    int    `toml:"domain_update_interval_min"`
 }
 
 type Config struct {
