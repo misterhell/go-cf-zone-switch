@@ -134,21 +134,23 @@ func (r *Switcher) changeDomainsFromTo(fromIP string, server *db.ProxyServerRow)
 	log.Println("switcher: All domain updates attempted")
 }
 
-func (r *Switcher) updateDomainToServer(fromServerIP string, domainWithCfToken db.DomainRow, toServer *db.ProxyServerRow) error {
+func (r *Switcher) updateDomainToServer(unhealthyServerIP string, domainWithCfToken db.DomainRow, toServer *db.ProxyServerRow) error {
 	client := r.cfClientFactory(domainWithCfToken.CfApiToken)
 
 	currentIP, err := client.GetDomainIP(domainWithCfToken.Domain)
 	if err != nil {
 		return fmt.Errorf("failed to get current IP for domain %s: %v", domainWithCfToken.Domain, err)
 	}
-	if currentIP == fromServerIP {
-		log.Printf("switcher: Domain %s already points to %s, skipping update", domainWithCfToken.Domain, fromServerIP)
+	if currentIP != unhealthyServerIP {
+		log.Printf("switcher: Domain %s->%s already points not to %s, skipping update", domainWithCfToken.Domain, currentIP, unhealthyServerIP)
 		return nil
 	}
-	err = client.UpdateDomainIP(domainWithCfToken.Domain, toServer.Host)
-	if err != nil {
+
+	if err = client.UpdateDomainIP(domainWithCfToken.Domain, toServer.Host); err != nil {
 		return err
 	}
+
+	r.Notify(fmt.Sprintf("Domain %s switched from %s to %s", domainWithCfToken.Domain, unhealthyServerIP, toServer.Host))
 
 	return nil
 }
