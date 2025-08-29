@@ -10,46 +10,13 @@ import (
 	"syscall"
 	"time"
 
-	// "go-cf-zone-switch/pkg/at"
 	"go-cf-zone-switch/pkg/at"
 	"go-cf-zone-switch/pkg/config"
 	"go-cf-zone-switch/pkg/db"
 	"go-cf-zone-switch/pkg/notifications"
 	"go-cf-zone-switch/pkg/servers"
+	"go-cf-zone-switch/pkg/switcher"
 )
-
-type Reporter struct {
-	storage *db.Storage
-}
-
-func NewReporter(ctx context.Context, storage *db.Storage, noti Notifier) *Reporter {
-	_ = noti 
-	_ = ctx
-	return &Reporter{
-		storage: storage,
-	}
-}
-
-func (r *Reporter) ReportStatus(statuses []servers.ServerStatus) error {
-	serverRows := []db.ProxyServerRow{}
-	for _, s := range statuses {
-		log.Printf("reporter: Report received %+v\n", s)
-
-		serverRows = append(serverRows, db.ProxyServerRow{
-			Host:      s.Host,
-			IsUp:      s.IsUp,
-			CheckPort: s.Port,
-			LastCheck: s.LastCheck,
-		})
-	}
-
-	err := r.storage.SaveProxyServers(serverRows)
-	if err != nil {
-		log.Println("Error saving servers", err)
-	}
-
-	return nil
-}
 
 type Notifier interface {
 	Notify(message string) error
@@ -85,11 +52,9 @@ func main() {
 
 	notifier := getNotifier(cfg)
 
-	// TODO: replace with a real service
-	reporter := NewReporter(ctx, storage, notifier)
+	switcher := switcher.NewSwitcher(cfg, storage, notifier)
 
-	err = startMonitoring(ctx, cfg, reporter, notifier)
-	checkErr(err)
+	startMonitoring(ctx, cfg, switcher, notifier)
 
 	startDomainDataSync(ctx, storage, repo, cfg, notifier)
 
@@ -117,7 +82,7 @@ func main() {
 	log.Println("app: exiting")
 }
 
-func startMonitoring(ctx context.Context, cfg *config.Config, reporter *Reporter, notifier Notifier) error {
+func startMonitoring(ctx context.Context, cfg *config.Config, reporter servers.StatusReceiver, notifier Notifier) {
 	checkInterval := time.Second * time.Duration(cfg.Servers.CheckIntervalSec)
 	timeout := time.Second * time.Duration(cfg.Servers.TimeoutSec)
 
@@ -125,16 +90,13 @@ func startMonitoring(ctx context.Context, cfg *config.Config, reporter *Reporter
 
 	for _, proxy := range cfg.Servers.Proxy {
 		h, p, err := net.SplitHostPort(proxy)
-		
 		if err != nil {
-			return err
+			panic(err)
 		}
 		monitoring.AddServer(h, p, proxy)
 	}
 
 	monitoring.Start(ctx)
-
-	return nil
 }
 
 func getNotifier(cfg *config.Config) notifications.Notifier {

@@ -109,6 +109,30 @@ func (s *Storage) GetAllDomains() ([]DomainRow, error) {
 	return domains, nil
 }
 
+func (s *Storage) GetDomainWithCfTokens() ([]DomainRow, error) {
+	var domainsWithTokens []DomainRow
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(domainsBucket)
+		if b == nil {
+			return nil
+		}
+		return b.ForEach(func(k, v []byte) error {
+			var d DomainRow
+			if err := json.Unmarshal(v, &d); err != nil {
+				return err
+			}
+			if d.CfApiToken != "" {
+				domainsWithTokens = append(domainsWithTokens, d)
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return domainsWithTokens, nil
+}
+
 type ProxyServerRow struct {
 	IsUp      bool      `json:"is_up"`
 	Host      string    `json:"host"`
@@ -174,5 +198,3 @@ func (s *Storage) GetProxyServers(isUp bool) ([]ProxyServerRow, error) {
 
 	return servers, err
 }
-
-// func (s *Storage) Update

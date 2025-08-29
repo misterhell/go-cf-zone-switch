@@ -171,7 +171,7 @@ func (p *ProxyConfigUpdater) sendUpdateToServer(server Server, domains []Domain)
 
 		resp, err := client.Do(req)
 		if err != nil {
-			err := p.Notifier.Notify("Error sending update for domains: response code >= 300")
+			_ = p.Notifier.Notify("Error sending update for domains: response code >= 300")
 			return fmt.Errorf("failed to send request: %w", err)
 		}
 		defer resp.Body.Close()
@@ -183,7 +183,6 @@ func (p *ProxyConfigUpdater) sendUpdateToServer(server Server, domains []Domain)
 			if err != nil {
 				return err
 			}
-			// TODO: update server in server list as isUP = false
 			return fmt.Errorf("server returned status %s: %s", resp.Status, body)
 		}
 		break // TODO: remove
