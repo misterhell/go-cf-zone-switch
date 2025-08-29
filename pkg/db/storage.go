@@ -14,21 +14,32 @@ var (
 	domainsBucket = []byte("domains")
 )
 
-type Storage struct {
-	db *bolt.DB
+type Storage interface {
+	SaveProxyServers([]ProxyServerRow) error
+	GetProxyServers(onlyHealthy bool) ([]ProxyServerRow, error)
+	GetDomainWithCfTokens() ([]DomainRow, error)
+	SaveDomains([]DomainRow) error
+	GetAllDomains() ([]DomainRow, error)
+	Close()
 }
 
-func (s *Storage) Close() {
+type DbStorage struct {
+	db *bolt.DB
+
+	Storage
+}
+
+func (s *DbStorage) Close() {
 	defer s.db.Close()
 }
 
-func NewStorage() (*Storage, error) {
+func NewStorage() (*DbStorage, error) {
 	db, err := bolt.Open(storage, 0o600, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	storage := &Storage{
+	storage := &DbStorage{
 		db: db,
 	}
 
@@ -39,7 +50,7 @@ func NewStorage() (*Storage, error) {
 	return storage, nil
 }
 
-func (s *Storage) initDbBuckets() error {
+func (s *DbStorage) initDbBuckets() error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		if _, err := tx.CreateBucketIfNotExists(serverBucket); err != nil {
 			return err
@@ -66,7 +77,7 @@ func (d DomainRow) Value() ([]byte, error) {
 	return json.Marshal(d)
 }
 
-func (s *Storage) SaveDomains(domains []DomainRow) error {
+func (s *DbStorage) SaveDomains(domains []DomainRow) error {
 	return s.db.Batch(func(tx *bolt.Tx) error {
 		b := tx.Bucket(domainsBucket)
 
@@ -85,7 +96,7 @@ func (s *Storage) SaveDomains(domains []DomainRow) error {
 	})
 }
 
-func (s *Storage) GetAllDomains() ([]DomainRow, error) {
+func (s *DbStorage) GetAllDomains() ([]DomainRow, error) {
 	var domains []DomainRow
 	err := s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(domainsBucket)
@@ -109,7 +120,7 @@ func (s *Storage) GetAllDomains() ([]DomainRow, error) {
 	return domains, nil
 }
 
-func (s *Storage) GetDomainWithCfTokens() ([]DomainRow, error) {
+func (s *DbStorage) GetDomainWithCfTokens() ([]DomainRow, error) {
 	var domainsWithTokens []DomainRow
 	err := s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(domainsBucket)
@@ -148,7 +159,7 @@ func (d ProxyServerRow) Value() ([]byte, error) {
 	return json.Marshal(d)
 }
 
-func (s *Storage) SaveProxyServers(servers []ProxyServerRow) error {
+func (s *DbStorage) SaveProxyServers(servers []ProxyServerRow) error {
 	return s.db.Batch(func(tx *bolt.Tx) error {
 		b := tx.Bucket(serverBucket)
 		for _, server := range servers {
@@ -165,7 +176,7 @@ func (s *Storage) SaveProxyServers(servers []ProxyServerRow) error {
 	})
 }
 
-func (s *Storage) GetProxyServers(isUp bool) ([]ProxyServerRow, error) {
+func (s *DbStorage) GetProxyServers(isUp bool) ([]ProxyServerRow, error) {
 	var servers []ProxyServerRow
 
 	err := s.db.View(func(tx *bolt.Tx) error {

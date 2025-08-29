@@ -9,13 +9,13 @@ import (
 )
 
 type DbDomainsUpdater struct {
-	Db       *db.Storage
+	Db       db.Storage
 	Repo     *RemoteRepository
 	Interval time.Duration
 	Notifier Notifier
 }
 
-func NewDbDomainsSync(db *db.Storage, at *RemoteRepository, interval time.Duration, notifier Notifier) *DbDomainsUpdater {
+func NewDbDomainsSync(db db.Storage, at *RemoteRepository, interval time.Duration, notifier Notifier) *DbDomainsUpdater {
 	return &DbDomainsUpdater{
 		Db:       db,
 		Repo:     at,

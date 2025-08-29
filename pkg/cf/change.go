@@ -13,8 +13,18 @@ const (
 	CloudflareAPI = "https://api.cloudflare.com/client/v4"
 )
 
-type Client struct {
+type Client interface {
+	GetZoneID(domain string) (string, error)
+	GetDNSRecords(zoneID, recordType, name string) ([]DNSRecord, error)
+	UpdateDNSRecord(zoneID, recordID, newIP string) error
+	GetDomainIP(domain string) (string, error)
+	UpdateDomainIP(domain, newIP string) error
+}
+
+type ApiClient struct {
 	Token string
+
+	Client
 }
 
 // DNSRecord represents a Cloudflare DNS record
@@ -47,14 +57,14 @@ type CloudflareError struct {
 	Message string `json:"message"`
 }
 
-func NewClient(token string) *Client {
-	return &Client{
+func NewApiClient(token string) Client {
+	return &ApiClient{
 		Token: token,
 	}
 }
 
 // newRequest creates a new HTTP request with authorization headers
-func (c *Client) newRequest(method, url string, body io.Reader) (*http.Request, error) {
+func (c *ApiClient) newRequest(method, url string, body io.Reader) (*http.Request, error) {
 	fullUrl := fmt.Sprintf("%s%s", CloudflareAPI, url)
 
 	req, err := http.NewRequest(method, fullUrl, body)
@@ -69,7 +79,7 @@ func (c *Client) newRequest(method, url string, body io.Reader) (*http.Request, 
 }
 
 // GetZoneID retrieves the zone ID for a domain
-func (c *Client) GetZoneID(domain string) (string, error) {
+func (c *ApiClient) GetZoneID(domain string) (string, error) {
 	// Ensure we're searching by the root domain
 	rootDomain := domain
 	if strings.Count(domain, ".") > 1 {
@@ -116,7 +126,7 @@ func (c *Client) GetZoneID(domain string) (string, error) {
 }
 
 // GetDNSRecords retrieves DNS records of a specific type for a zone
-func (c *Client) GetDNSRecords(zoneID, recordType, name string) ([]DNSRecord, error) {
+func (c *ApiClient) GetDNSRecords(zoneID, recordType, name string) ([]DNSRecord, error) {
 	url := fmt.Sprintf("/zones/%s/dns_records", zoneID)
 
 	// Add filters if provided
@@ -166,7 +176,7 @@ func (c *Client) GetDNSRecords(zoneID, recordType, name string) ([]DNSRecord, er
 }
 
 // UpdateDNSRecord updates a DNS record with a new IP address
-func (c *Client) UpdateDNSRecord(zoneID, recordID, newIP string) error {
+func (c *ApiClient) UpdateDNSRecord(zoneID, recordID, newIP string) error {
 	url := fmt.Sprintf("/zones/%s/dns_records/%s", zoneID, recordID)
 
 	updateData := map[string]string{
@@ -207,7 +217,7 @@ func (c *Client) UpdateDNSRecord(zoneID, recordID, newIP string) error {
 }
 
 // GetDomainIP retrieves the current IP address of the A record for a domain
-func (c *Client) GetDomainIP(domain string) (string, error) {
+func (c *ApiClient) GetDomainIP(domain string) (string, error) {
 	// Step 1: Get the zone ID for the domain
 	zoneID, err := c.GetZoneID(domain)
 	if err != nil {
@@ -235,7 +245,7 @@ func (c *Client) GetDomainIP(domain string) (string, error) {
 }
 
 // UpdateDomainIP updates the A record for a domain with a new IP address
-func (c *Client) UpdateDomainIP(domain, newIP string) error {
+func (c *ApiClient) UpdateDomainIP(domain, newIP string) error {
 	// Step 1: Get the zone ID for the domain
 	zoneID, err := c.GetZoneID(domain)
 	if err != nil {

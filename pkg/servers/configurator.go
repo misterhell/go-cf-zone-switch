@@ -17,7 +17,7 @@ import (
 )
 
 type ProxyConfigUpdater struct {
-	Storage        *db.Storage
+	Storage        db.Storage
 	UpdateInterval time.Duration
 	Endpoint       string
 	Notifier       Notifier
@@ -32,7 +32,7 @@ type Server struct {
 	Address string
 }
 
-func NewProxyConfigUpdater(storage *db.Storage, config *config.Servers, notifier Notifier) *ProxyConfigUpdater {
+func NewProxyConfigUpdater(storage db.Storage, config *config.Servers, notifier Notifier) *ProxyConfigUpdater {
 	interval := time.Minute * time.Duration(config.DomainUpdateIntervalMin)
 
 	return &ProxyConfigUpdater{
@@ -126,7 +126,7 @@ func (p *ProxyConfigUpdater) updateDomains() error {
 func newHttpClient() *http.Client {
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true, // ⚠️ ОПАСНО: только для отладки! //nolint:gosec
+			InsecureSkipVerify: true, // ⚠️ UNSAFE: for self-signed certs
 		},
 	}
 
@@ -185,7 +185,6 @@ func (p *ProxyConfigUpdater) sendUpdateToServer(server Server, domains []Domain)
 			}
 			return fmt.Errorf("server returned status %s: %s", resp.Status, body)
 		}
-		break // TODO: remove
 	}
 	log.Printf("configurator: domain updates sent to server %s \n", server.Address)
 	return nil

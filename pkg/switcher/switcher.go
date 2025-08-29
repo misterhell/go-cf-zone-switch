@@ -8,13 +8,22 @@ import (
 	"go-cf-zone-switch/pkg/cf"
 	"go-cf-zone-switch/pkg/config"
 	"go-cf-zone-switch/pkg/db"
+	"go-cf-zone-switch/pkg/notifications"
 	"go-cf-zone-switch/pkg/servers"
 )
 
+const (
+	defaultSwitchAfterFailureCount = 5
+	maxConcurrentDomainUpdates     = 5
+)
+
+type CFClientFactory func(token string) cf.Client
+
 type Switcher struct {
-	storage                 *db.Storage
-	notifier                Notifier
+	storage                 db.Storage
+	notifier                notifications.Notifier
 	switchAfterFailureCount int
+	cfClientFactory         CFClientFactory
 
 	failureCounts map[string]int // key: Host
 	mu            sync.Mutex
@@ -22,11 +31,13 @@ type Switcher struct {
 	servers.StatusReceiver
 }
 
-func NewSwitcher(config *config.Config, storage *db.Storage, notifier Notifier) *Switcher {
+func NewSwitcher(config *config.Config, storage db.Storage, notifier notifications.Notifier) *Switcher {
 	return &Switcher{
-		storage:       storage,
-		notifier:      notifier,
-		failureCounts: make(map[string]int),
+		storage:                 storage,
+		notifier:                notifier,
+		switchAfterFailureCount: defaultSwitchAfterFailureCount,
+		cfClientFactory:         cf.NewApiClient, // use function to create cf.Client from cf package
+		failureCounts:           make(map[string]int),
 	}
 }
 
@@ -45,14 +56,15 @@ func (r *Switcher) ReceiveStatus(statuses []servers.ServerStatus) error {
 			r.failureCounts[s.Host] = 0
 		}
 
-		// If failed 3 times, trigger switch
+		// If failed N times, trigger switch
 		if r.failureCounts[s.Host] >= r.switchAfterFailureCount {
 			log.Printf("switcher: Host %s failed %d times, switching domains...", s.Host, r.switchAfterFailureCount)
 			healthy, err := r.selectHealthyServer()
 			if err != nil {
 				log.Printf("switcher: No healthy server found: %v", err)
+				r.Notify("No healthy server found")
 			} else {
-				r.changeDomainsTo(healthy)
+				r.changeDomainsFromTo(s.Host, healthy)
 			}
 			r.failureCounts[s.Host] = 0 // reset after switch
 		}
@@ -88,19 +100,18 @@ func (r *Switcher) selectHealthyServer() (*db.ProxyServerRow, error) {
 }
 
 // changeDomainsTo is a placeholder for the logic to change domains to the new server
-func (r *Switcher) changeDomainsTo(server *db.ProxyServerRow) {
+func (r *Switcher) changeDomainsFromTo(fromIP string, server *db.ProxyServerRow) {
 	log.Printf("switcher: Changing domains to new server: %+v", server)
-	
+
 	domains, err := r.storage.GetDomainWithCfTokens()
 	if err != nil {
 		log.Printf("switcher: Failed to get domains with CF tokens: %v", err)
 		return
 	}
 
-	const maxConcurrent = 5
-	sem := make(chan struct{}, maxConcurrent)
+	sem := make(chan struct{}, maxConcurrentDomainUpdates)
 	var wg sync.WaitGroup
-	
+
 	for _, domain := range domains {
 		wg.Add(1)
 		sem <- struct{}{} // acquire
@@ -109,7 +120,7 @@ func (r *Switcher) changeDomainsTo(server *db.ProxyServerRow) {
 			defer wg.Done()
 			defer func() { <-sem }() // release
 
-			err := r.updateDomainToServer(d, server)
+			err := r.updateDomainToServer(fromIP, d, server)
 			if err != nil {
 				log.Printf("switcher: Failed to update domain %s: %v", d.Domain, err)
 				r.Notify(fmt.Sprintf("Failed to update domain %s: %v", d.Domain, err))
@@ -123,16 +134,23 @@ func (r *Switcher) changeDomainsTo(server *db.ProxyServerRow) {
 	log.Println("switcher: All domain updates attempted")
 }
 
+func (r *Switcher) updateDomainToServer(fromServerIP string, domainWithCfToken db.DomainRow, toServer *db.ProxyServerRow) error {
+	client := r.cfClientFactory(domainWithCfToken.CfApiToken)
 
-func (r *Switcher) updateDomainToServer(domainWithCfToken db.DomainRow, server *db.ProxyServerRow) error {
-	client := cf.NewClient(domainWithCfToken.CfApiToken)
-
-	err := client.UpdateDomainIP(domainWithCfToken.Domain, server.Host)
+	currentIP, err := client.GetDomainIP(domainWithCfToken.Domain)
+	if err != nil {
+		return fmt.Errorf("failed to get current IP for domain %s: %v", domainWithCfToken.Domain, err)
+	}
+	if currentIP == fromServerIP {
+		log.Printf("switcher: Domain %s already points to %s, skipping update", domainWithCfToken.Domain, fromServerIP)
+		return nil
+	}
+	err = client.UpdateDomainIP(domainWithCfToken.Domain, toServer.Host)
 	if err != nil {
 		return err
 	}
 
-    return nil
+	return nil
 }
 
 func (r *Switcher) Notify(message string) {

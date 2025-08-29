@@ -34,7 +34,7 @@ func main() {
 	domains, _ := atr.GetAllDomains()
 
 	for _, domain := range domains {
-		c := cf.NewClient(domain.CfApiToken)
+		c := cf.NewApiClient(domain.CfApiToken)
 		ip, err := c.GetDomainIP(domain.Domain)
 		if err != nil {
 			log.Panicln(err)

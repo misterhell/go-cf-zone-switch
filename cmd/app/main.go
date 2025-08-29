@@ -106,7 +106,7 @@ func getNotifier(cfg *config.Config) notifications.Notifier {
 	return notifier
 }
 
-func startDomainDataSync(ctx context.Context, storage *db.Storage, repo *at.RemoteRepository, config *config.Config, notifier Notifier) {
+func startDomainDataSync(ctx context.Context, storage *db.DbStorage, repo *at.RemoteRepository, config *config.Config, notifier Notifier) {
 	updateInterval := time.Duration(config.At.DomainsUpdateMin) * time.Minute
 
 	updater := at.NewDbDomainsSync(storage, repo, updateInterval, notifier)
@@ -114,7 +114,7 @@ func startDomainDataSync(ctx context.Context, storage *db.Storage, repo *at.Remo
 	updater.Start(ctx)
 }
 
-func startProxyConfigurator(ctx context.Context, storage *db.Storage, config *config.Config, notifier Notifier) {
+func startProxyConfigurator(ctx context.Context, storage *db.DbStorage, config *config.Config, notifier Notifier) {
 	configUpdater := servers.NewProxyConfigUpdater(storage, &config.Servers, notifier)
 
 	configUpdater.Start(ctx)
