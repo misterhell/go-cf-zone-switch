@@ -5,11 +5,11 @@ accounts_table = "tbl..."
 accounts_view = "viw..."
 hosting_table = "tbl..."
 token = "patm..."
-domains_update_min = 60
+domains_update_min = 60 # reload domains from Airtable
 
 [Servers]
-proxy = ["176.9.0.2", "176.9.0.2"]
-check_interval_sec = 30
-timeout_sec = 5
-domain_update_endpoint = "/update"
-domain_update_interval_min = 60
+proxy = ["http://*.*.*.*:5214", "http://*.*.*.*:5214"]
+check_interval_sec = 30 # Interval between health checks
+timeout_sec = 5 
+domain_update_endpoint = "/" # Uses proxy http://*.*.*.*:5214/<endpont>
+domain_update_interval_min = 60 # Send domains to proxy server

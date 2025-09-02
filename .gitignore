@@ -6,3 +6,5 @@
 config.toml
 
 *.boltdb
+
+bin
