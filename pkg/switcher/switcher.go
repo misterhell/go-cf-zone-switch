@@ -109,16 +109,16 @@ func (r *Switcher) changeDomainsFromTo(fromIP string, server *db.ProxyServerRow)
 		return
 	}
 
-	sem := make(chan struct{}, maxConcurrentDomainUpdates)
+	semaphore := make(chan struct{}, maxConcurrentDomainUpdates)
 	var wg sync.WaitGroup
 
 	for _, domain := range domains {
 		wg.Add(1)
-		sem <- struct{}{} // acquire
+		semaphore <- struct{}{} // acquire
 
 		go func(d db.DomainRow) {
 			defer wg.Done()
-			defer func() { <-sem }() // release
+			defer func() { <-semaphore }() // release
 
 			err := r.updateDomainToServer(fromIP, d, server)
 			if err != nil {
@@ -141,7 +141,7 @@ func (r *Switcher) updateDomainToServer(unhealthyServerIP string, domainWithCfTo
 	if err != nil {
 		return fmt.Errorf("failed to get current IP for domain %s: %v", domainWithCfToken.Domain, err)
 	}
-	if currentIP != unhealthyServerIP {
+	if unhealthyServerIP != "" && currentIP != unhealthyServerIP {
 		log.Printf("switcher: Domain %s->%s already points not to %s, skipping update", domainWithCfToken.Domain, currentIP, unhealthyServerIP)
 		return nil
 	}
@@ -160,4 +160,31 @@ func (r *Switcher) Notify(message string) {
 	if err != nil {
 		log.Printf("switcher: Failed to send notification: %v", err)
 	}
+}
+
+func (r *Switcher) ChangeAllDomainsToServer(domains []db.DomainRow, server *db.ProxyServerRow) {
+	log.Printf("switcher: Changing all domains to new server: %+v", server)
+
+	semaphore := make(chan struct{}, maxConcurrentDomainUpdates)
+	var wg sync.WaitGroup
+
+	for _, domain := range domains {
+		wg.Add(1)
+		semaphore <- struct{}{} // acquire
+
+		go func(d db.DomainRow) {
+			defer wg.Done()
+			defer func() { <-semaphore }() // release
+
+			err := r.updateDomainToServer("", d, server)
+			if err != nil {
+				log.Printf("switcher: Failed to update domain %s: %v", d.Domain, err)
+			} else {
+				log.Printf("switcher: Updated domain %s to server %s", d.Domain, server.Host)
+			}
+		}(domain)
+	}
+
+	wg.Wait()
+	log.Println("switcher: All domain updates attempted")
 }

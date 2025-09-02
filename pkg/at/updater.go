@@ -28,8 +28,8 @@ func (d *DbDomainsUpdater) Start(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(d.Interval)
 		defer ticker.Stop()
-		err := d.Sync()
-		if err != nil {
+
+		if err := d.Sync(); err != nil {
 			log.Println("updater: Domains update error", err)
 		}
 

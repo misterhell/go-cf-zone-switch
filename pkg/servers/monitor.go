@@ -3,7 +3,6 @@ package servers
 import (
 	"context"
 	"log"
-	"sync"
 	"time"
 )
 
@@ -21,38 +20,34 @@ type StatusReceiver interface {
 }
 
 type ServerMonitor struct {
-	servers        []struct{ Host, Port, ID string }
+	servers        []struct{ Host, Port, ID, Schema string }
 	checkInterval  time.Duration
 	timeout        time.Duration
 	statusReceiver StatusReceiver
 	notifier       Notifier
-	stopCh         chan struct{}
-	wg             sync.WaitGroup
 }
 
 func NewServerMonitoring(checkInterval, timeout time.Duration, reporter StatusReceiver, notifier Notifier) *ServerMonitor {
 	return &ServerMonitor{
-		servers:        []struct{ Host, Port, ID string }{},
+		servers:        []struct{ Host, Port, ID, Schema string }{},
 		checkInterval:  checkInterval,
 		timeout:        timeout,
 		statusReceiver: reporter,
 		notifier:       notifier,
-		stopCh:         make(chan struct{}),
 	}
 }
 
-func (m *ServerMonitor) AddServer(host, port, id string) {
+func (m *ServerMonitor) AddServer(host, port, id, schema string) {
 	m.servers = append(m.servers, struct {
-		Host string
-		Port string
-		ID   string
-	}{host, port, id})
+		Host   string
+		Port   string
+		ID     string
+		Schema string
+	}{host, port, id, schema})
 }
 
 func (m *ServerMonitor) Start(ctx context.Context) {
-	m.wg.Add(1)
 	go func() {
-		defer m.wg.Done()
 		ticker := time.NewTicker(m.checkInterval)
 		defer ticker.Stop()
 
@@ -64,9 +59,6 @@ func (m *ServerMonitor) Start(ctx context.Context) {
 				m.checkServers(ctx)
 			case <-ctx.Done():
 				log.Println("monitor: stopped due to context cancellation")
-				return
-			case <-m.stopCh:
-				log.Println("monitor: stopped")
 				return
 			}
 		}

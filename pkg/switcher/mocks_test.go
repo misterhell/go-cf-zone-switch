@@ -14,8 +14,6 @@ type MockCfClient struct {
 	cf.Client
 }
 
-
-
 func (m *MockCfClient) GetZoneID(domain string) (string, error) {
 	return "mock-zone-id", nil
 }
@@ -56,16 +54,19 @@ func (m *MockNotifier) Notify(msg string) error {
 }
 
 type MockStorage struct {
-	SaveProxyServersCalled      bool
-	GetProxyServersCalled       bool
-	GetProxyServersFunc         func(onlyHealthy bool) ([]db.ProxyServerRow, error)
+	GetProxyServersCalled bool
+	GetProxyServersFunc   func(onlyHealthy bool) ([]db.ProxyServerRow, error)
+
 	GetDomainWithCfTokensCalled bool
 	GetDomainWithCfTokensFunc   func() ([]db.DomainRow, error)
+
+	SaveProxyServersCalled bool
+	SaveProxyServersFunc   func(rows []db.ProxyServerRow) error
 }
 
 func (m *MockStorage) SaveProxyServers(rows []db.ProxyServerRow) error {
 	m.SaveProxyServersCalled = true
-	return nil
+	return m.SaveProxyServersFunc(rows)
 }
 
 func (m *MockStorage) GetProxyServers(onlyHealthy bool) ([]db.ProxyServerRow, error) {

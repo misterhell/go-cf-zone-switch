@@ -101,7 +101,6 @@ func (r *RemoteRepository) GetAllDomainsForIpChange() ([]AtDomain, error) {
 
 func (r *RemoteRepository) GetAllDomains() ([]AtDomain, error) {
 	domainsData, err := r.client.FetchAllDomains()
-
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +120,7 @@ func (r *RemoteRepository) GetAllDomains() ([]AtDomain, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	atDomains := []AtDomain{}
 	for _, domain := range domainsData {
 		hostingIP := ""
@@ -133,8 +132,9 @@ func (r *RemoteRepository) GetAllDomains() ([]AtDomain, error) {
 		re := regexp.MustCompile(`[^a-zA-Z0-9.-]`)
 		cleanDomain := re.ReplaceAllString(domain.Domain, "")
 		atDomains = append(atDomains, AtDomain{
-			Domain:    cleanDomain,
-			HostingIP: hostingIP,
+			Domain:     cleanDomain,
+			HostingIP:  hostingIP,
+			CfApiToken: domain.CfApiToken,
 		})
 	}
 

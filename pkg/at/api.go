@@ -16,6 +16,7 @@ const (
 	fieldDomainReqIDs  = "Domain"
 	fieldHostingReqIDs = "Hosting"
 
+	fieldsDomainTblCFApiToken = "API Key CF"
 	fieldsDomainTblDomain     = "Domain"
 	fieldsDomainTblHostingIDs = "Hosting"
 )
@@ -47,7 +48,7 @@ func (c *Client) makeRequest(reqType, tbl, view string) (*http.Request, error) {
 
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", c.cfg.GetApiToken()))
 
-	log.Printf("sending request: %s?%s \n", url, req.URL.RawQuery)
+	log.Printf("at_api: sending request: %s?%s \n", url, req.URL.RawQuery)
 	return req, err
 }
 
@@ -85,7 +86,7 @@ func (r *Record) getAPIKeyCF() string {
 			return s
 		}
 	default:
-		log.Printf("unexpected type: %T\n", value)
+		log.Printf("at_api: unexpected type: %T\n", value)
 	}
 
 	return ""
@@ -105,7 +106,6 @@ func (r *Record) getDomainsReqIDs() []string {
 			return domains
 		}
 	}
-	log.Println("not exist")
 
 	return []string{}
 }
@@ -122,28 +122,28 @@ type ErrorResponse struct {
 func (c *Client) handleResponse(resp *http.Response, result interface{}) error {
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("failed to close response body: %v", err)
+			log.Printf("at_api: failed to close response body: %v", err)
 		}
 	}()
 
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusNotFound {
-			return fmt.Errorf("api returned 404 code")
+			return fmt.Errorf("at_api: api returned 404 code")
 		}
 
 		var errorResp ErrorResponse
 		if err := json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
 			bodyBytes, _ := io.ReadAll(resp.Body)
-			
-			log.Printf("Error Status %d, Full response body: %s", resp.StatusCode, string(bodyBytes))
 
-			return fmt.Errorf("failed to decode error response: %w", err)
+			log.Printf("at_api: Error Status %d, Full response body: %s", resp.StatusCode, string(bodyBytes))
+
+			return fmt.Errorf("at_api: failed to decode error response: %w", err)
 		}
-		return fmt.Errorf("api error: %+v", errorResp)
+		return fmt.Errorf("at_api: api error: %+v", errorResp)
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
-		return fmt.Errorf("failed to decode response: %w", err)
+		return fmt.Errorf("at_api: failed to decode response: %w", err)
 	}
 
 	return nil
@@ -243,8 +243,9 @@ func (c *Client) GetDomain(reqID string) (string, string, error) {
 }
 
 type domainRecord struct {
-	Domain    string
-	HostingID string
+	Domain     string
+	HostingID  string
+	CfApiToken string
 }
 
 func (c *Client) multiDomainRequest(reqIDs []string) (map[string]domainRecord, error) {
@@ -381,7 +382,7 @@ func (c *Client) FetchAllDomains() ([]domainRecord, error) {
 			Table:  c.cfg.GetDomainsTable(),
 			Offset: offset,
 			Params: map[string][]string{
-				"fields[]": {fieldsDomainTblDomain, fieldsDomainTblHostingIDs},
+				"fields[]": {fieldsDomainTblDomain, fieldsDomainTblHostingIDs, fieldsDomainTblCFApiToken},
 			},
 		})
 		if err != nil {
@@ -402,6 +403,11 @@ func (c *Client) FetchAllDomains() ([]domainRecord, error) {
 				if hostingID, ok := hostings[0].(string); ok {
 					dr.HostingID = hostingID
 				}
+			}
+
+			if cfApiToken, ok := record.Fields[fieldsDomainTblCFApiToken].(string); ok && len(cfApiToken) > 0 {
+				// Just to avoid unused variable warning
+				dr.CfApiToken = cfApiToken
 			}
 
 			if dr.Domain != "" { // Only add records that have a domain name

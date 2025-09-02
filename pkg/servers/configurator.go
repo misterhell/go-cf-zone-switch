@@ -113,7 +113,7 @@ func (p *ProxyConfigUpdater) updateDomains() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(servers)
+	fmt.Println("configurator: servers loaded", servers)
 	for _, server := range servers {
 		if err := p.sendUpdateToServer(server, domains); err != nil {
 			// Log error and continue updating other servers
@@ -144,20 +144,22 @@ func (p *ProxyConfigUpdater) sendUpdateToServer(server Server, domains []Domain)
 
 	client := newHttpClient()
 
-	batchSize := 100
-	total := len(domains)
-	for i := 0; i < total; i += batchSize {
-		end := i + batchSize
-		if end > total {
-			end = total
-		}
-		batch := domains[i:end]
+	// batchSize := 100
+	// total := len(domains)
+	// for i := 0; i < total; i += batchSize {
+		// end := i + batchSize
+		// if end > total {
+			// end = total
+		// }
+		// batch := domains[i:end]
 
 		// TODO: could be http or https?
 		url := "http://" + server.Address + p.Endpoint
 
 		// Marshal the batch of domains into JSON.
-		payload, err := json.Marshal(batch)
+		// payload, err := json.Marshal(batch)
+		payload, err := json.Marshal(domains)
+
 		if err != nil {
 			return fmt.Errorf("failed to marshal batch: %w", err)
 		}
@@ -185,7 +187,7 @@ func (p *ProxyConfigUpdater) sendUpdateToServer(server Server, domains []Domain)
 			}
 			return fmt.Errorf("server returned status %s: %s", resp.Status, body)
 		}
-	}
+	// }
 	log.Printf("configurator: domain updates sent to server %s \n", server.Address)
 	return nil
 }

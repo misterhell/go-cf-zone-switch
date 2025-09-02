@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -89,11 +90,18 @@ func startMonitoring(ctx context.Context, cfg *config.Config, reporter servers.S
 	monitoring := servers.NewServerMonitoring(checkInterval, timeout, reporter, notifier)
 
 	for _, proxy := range cfg.Servers.Proxy {
+		schema := "http"
+		if strings.HasPrefix(proxy, "https://") {
+			schema = "https"
+		}
+
+		proxy = strings.TrimPrefix(strings.TrimPrefix(proxy, "http://"), "https://")
+
 		h, p, err := net.SplitHostPort(proxy)
 		if err != nil {
 			panic(err)
 		}
-		monitoring.AddServer(h, p, proxy)
+		monitoring.AddServer(h, p, proxy, schema)
 	}
 
 	monitoring.Start(ctx)
